@@ -42,9 +42,12 @@ webServer.listen(PORT, () => {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
+
 
 // ======================================================
 // FILE PATHS
@@ -1479,7 +1482,80 @@ if (!process.env.DISCORD_TOKEN) {
 
   process.exit(1);
 }
+// ======================================================
+// CATEGORY MOVE COMMAND (.move)
+// ======================================================
 
+let savedCategoryId = null;
+
+client.on("messageCreate", async message => {
+  if (message.author.bot || !message.guild) return;
+
+  if (message.content.toLowerCase().startsWith(".move")) {
+    
+    // 1. Check Permission
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+      const reply = await message.reply("❌ You do not have `Manage Channels` permission!");
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        reply.delete().catch(() => {});
+      }, 5000);
+      return;
+    }
+
+    const args = message.content.trim().split(/ +/);
+    const inputCategoryId = args[1];
+
+    if (inputCategoryId) {
+      savedCategoryId = inputCategoryId;
+    }
+
+    if (!savedCategoryId) {
+      const reply = await message.reply("⚠️ No category saved! Set one first using `.move <category_id>`.");
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        reply.delete().catch(() => {});
+      }, 5000);
+      return;
+    }
+
+    const targetCategory = message.guild.channels.cache.get(savedCategoryId);
+
+    if (!targetCategory || targetCategory.type !== 4) { // 4 = GuildCategory
+      const reply = await message.reply("❌ Saved category ID was not found on this server! Set a valid ID using `.move <category_id>`.");
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        reply.delete().catch(() => {});
+      }, 5000);
+      return;
+    }
+
+    try {
+      await message.channel.setParent(targetCategory.id);
+
+      const responseText = inputCategoryId 
+        ? `✅ New category saved! Channel moved to **${targetCategory.name}**.` 
+        : `✅ Moved channel to saved category: **${targetCategory.name}**.`;
+
+      const reply = await message.reply(responseText);
+
+      // Auto delete command and reply after 5 seconds
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        reply.delete().catch(() => {});
+      }, 5000);
+
+    } catch (error) {
+      console.error("Move command error:", error);
+      const reply = await message.reply("❌ Failed to move channel! Ensure the bot has `Manage Channels` permission and its role is high enough.");
+      
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        reply.delete().catch(() => {});
+      }, 5000);
+    }
+  }
+});
 // ======================================================
 // LOGIN
 // ======================================================
