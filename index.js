@@ -1483,7 +1483,7 @@ if (!process.env.DISCORD_TOKEN) {
   process.exit(1);
 }
 // ======================================================
-// CATEGORY MOVE COMMAND (.move)
+// CATEGORY MOVE COMMAND (.move) - ADMIN ONLY
 // ======================================================
 
 let savedCategoryId = null;
@@ -1493,9 +1493,9 @@ client.on("messageCreate", async message => {
 
   if (message.content.toLowerCase().startsWith(".move")) {
     
-    // 1. Check Permission
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-      const reply = await message.reply("❌ You do not have `Manage Channels` permission!");
+    // 1. SIRF ADMINISTRATOR CHECK
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      const reply = await message.reply("❌ Only Server Administrators can use this command!");
       setTimeout(() => {
         message.delete().catch(() => {});
         reply.delete().catch(() => {});
@@ -1506,10 +1506,12 @@ client.on("messageCreate", async message => {
     const args = message.content.trim().split(/ +/);
     const inputCategoryId = args[1];
 
+    // Category ID save karein agar provide ki gayi hai
     if (inputCategoryId) {
       savedCategoryId = inputCategoryId;
     }
 
+    // Check agar koi category set nahi hai
     if (!savedCategoryId) {
       const reply = await message.reply("⚠️ No category saved! Set one first using `.move <category_id>`.");
       setTimeout(() => {
@@ -1519,6 +1521,7 @@ client.on("messageCreate", async message => {
       return;
     }
 
+    // Server me Category dhoondhein
     const targetCategory = message.guild.channels.cache.get(savedCategoryId);
 
     if (!targetCategory || targetCategory.type !== 4) { // 4 = GuildCategory
@@ -1531,15 +1534,27 @@ client.on("messageCreate", async message => {
     }
 
     try {
-      await message.channel.setParent(targetCategory.id);
+      // 2. Channel ki saari existing Permissions ko copy karein
+      const currentPermissions = message.channel.permissionOverwrites.cache.map(overwrite => ({
+        id: overwrite.id,
+        type: overwrite.type,
+        allow: overwrite.allow.bitfield,
+        deny: overwrite.deny.bitfield
+      }));
+
+      // 3. Channel move karein
+      await message.channel.setParent(targetCategory.id, { lockPermissions: false });
+
+      // 4. Exact permissions restore karein taaki ticket private rahe
+      await message.channel.permissionOverwrites.set(currentPermissions);
 
       const responseText = inputCategoryId 
-        ? `✅ New category saved! Channel moved to **${targetCategory.name}**.` 
-        : `✅ Moved channel to saved category: **${targetCategory.name}**.`;
+        ? `✅ New category saved! Channel moved to **${targetCategory.name}** with all permissions preserved.` 
+        : `✅ Moved channel to **${targetCategory.name}** with all permissions preserved.`;
 
       const reply = await message.reply(responseText);
 
-      // Auto delete command and reply after 5 seconds
+      // 5. Auto delete messages after 5 seconds
       setTimeout(() => {
         message.delete().catch(() => {});
         reply.delete().catch(() => {});
@@ -1547,7 +1562,7 @@ client.on("messageCreate", async message => {
 
     } catch (error) {
       console.error("Move command error:", error);
-      const reply = await message.reply("❌ Failed to move channel! Ensure the bot has `Manage Channels` permission and its role is high enough.");
+      const reply = await message.reply("❌ Failed to move channel! Check bot role order and permissions.");
       
       setTimeout(() => {
         message.delete().catch(() => {});
@@ -1556,6 +1571,8 @@ client.on("messageCreate", async message => {
     }
   }
 });
+
+
 // ======================================================
 // LOGIN
 // ======================================================
