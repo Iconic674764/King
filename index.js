@@ -48,6 +48,7 @@ db.tickets ??= {};
 db.panels ??= {};
 db.pendingButtons ??= {};
 db.vouches ??= {};
+db.ticketCounters ??= {};
 
 function saveDB() {
   fs.writeFileSync(
@@ -207,7 +208,21 @@ function isTicketAdmin(member, guildId) {
 // =====================================================
 // HELPERS
 // =====================================================
+function makeTicketId(guildId) {
+  db.ticketCounters ??= {};
 
+  if (!db.ticketCounters[guildId]) {
+    db.ticketCounters[guildId] = 0;
+  }
+
+  db.ticketCounters[guildId]++;
+
+  saveDB();
+
+  return String(
+    db.ticketCounters[guildId]
+  ).padStart(4, '0');
+}
 function timestamp(time = Date.now()) {
   return Math.floor(time / 1000);
 }
@@ -934,14 +949,25 @@ async function showPanelBuilder(
     panelButtons(panel);
 
   rows.push(
+  new ActionRowBuilder()
+    .addComponents(
 
-    new ActionRowBuilder()
-      .addComponents(
+      new ButtonBuilder()
+        .setCustomId(
+          `panel_edit_${panel.id}`
+        )
+        .setLabel(
+          'Edit Panel'
+        )
+        .setEmoji('🎨')
+        .setStyle(
+          ButtonStyle.Secondary
+        ),
 
-        new ButtonBuilder()
-          .setCustomId(
-            `panel_add_${panel.id}`
-          )
+      new ButtonBuilder()
+        .setCustomId(
+          `panel_add_${panel.id}`
+        )
           .setLabel(
             panel.buttons.length >= 25
               ? '25 Button Limit'
@@ -2492,6 +2518,156 @@ client.on(
           );
 
         }
+        
+        // -----------------------------------------------
+// EDIT PANEL
+// -----------------------------------------------
+
+if (
+  id.startsWith(
+    'panel_edit_'
+  )
+) {
+
+  if (
+    !isAdmin(
+      interaction.member
+    )
+  ) {
+    return interaction.reply({
+      content:
+        '❌ Administrator permission required.',
+      ephemeral: true
+    });
+  }
+
+  const panelId =
+    id.replace(
+      'panel_edit_',
+      ''
+    );
+
+  const panel =
+    db.panels[
+      panelId
+    ];
+
+  if (!panel) {
+    return interaction.reply({
+      content:
+        '❌ Panel not found.',
+      ephemeral: true
+    });
+  }
+
+  const modal =
+    new ModalBuilder()
+      .setCustomId(
+        `panel_edit_modal_${panelId}`
+      )
+      .setTitle(
+        '🎨 Edit Ticket Panel'
+      );
+
+  const title =
+    new TextInputBuilder()
+      .setCustomId(
+        'panel_title'
+      )
+      .setLabel(
+        'Panel Title'
+      )
+      .setStyle(
+        TextInputStyle.Short
+      )
+      .setRequired(true)
+      .setMaxLength(256)
+      .setValue(
+        panel.title ||
+        '🎫 Support Tickets'
+      );
+
+  const description =
+    new TextInputBuilder()
+      .setCustomId(
+        'panel_description'
+      )
+      .setLabel(
+        'Panel Description'
+      )
+      .setStyle(
+        TextInputStyle.Paragraph
+      )
+      .setRequired(true)
+      .setMaxLength(4000)
+      .setValue(
+        panel.description ||
+        'Select a ticket type below to open a ticket.'
+      );
+
+  const thumbnail =
+    new TextInputBuilder()
+      .setCustomId(
+        'panel_thumbnail'
+      )
+      .setLabel(
+        'Thumbnail URL'
+      )
+      .setStyle(
+        TextInputStyle.Short
+      )
+      .setRequired(false)
+      .setValue(
+        panel.thumbnail ||
+        ''
+      );
+
+  const banner =
+    new TextInputBuilder()
+      .setCustomId(
+        'panel_banner'
+      )
+      .setLabel(
+        'Banner Image URL'
+      )
+      .setStyle(
+        TextInputStyle.Short
+      )
+      .setRequired(false)
+      .setValue(
+        panel.banner ||
+        ''
+      );
+
+  const color =
+    new TextInputBuilder()
+      .setCustomId(
+        'panel_color'
+      )
+      .setLabel(
+        'Embed Color HEX'
+      )
+      .setStyle(
+        TextInputStyle.Short
+      )
+      .setRequired(false)
+      .setValue(
+        panel.color ||
+        '5865F2'
+      );
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(title),
+    new ActionRowBuilder().addComponents(description),
+    new ActionRowBuilder().addComponents(thumbnail),
+    new ActionRowBuilder().addComponents(banner),
+    new ActionRowBuilder().addComponents(color)
+  );
+
+  return interaction.showModal(
+    modal
+  );
+}
 
         // -----------------------------------------------
         // ADD PANEL BUTTON
@@ -2861,18 +3037,10 @@ client.on(
 
           }
 
-          const ticketNumber =
-            Object.keys(
-              db.tickets
-            ).length + 1;
-
           const ticketId =
-            String(
-              ticketNumber
-            ).padStart(
-              4,
-              '0'
-            );
+  makeTicketId(
+    interaction.guild.id
+  );
 
           const channelName =
             `${interaction.user.username}-${ticketId}`
