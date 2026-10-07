@@ -29,7 +29,8 @@ let db = {
   tickets: {},
   panels: {},
   pendingButtons: {},
-  vouches: {}
+  vouches: {},
+  ticketCounters: {}
 };
 
 if (fs.existsSync(DB_FILE)) {
