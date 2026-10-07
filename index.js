@@ -37,7 +37,8 @@ let db = {
   tickets: {},
   panels: {},
   pendingButtons: {},
-  vouches: {}
+  vouches: {},
+  ticketCounters: {}
 };
 
 if (fs.existsSync(DB_FILE)) {
@@ -55,6 +56,7 @@ db.tickets ??= {};
 db.panels ??= {};
 db.pendingButtons ??= {};
 db.vouches ??= {};
+db.ticketCounters ??= {};
 
 function saveDB() {
   fs.writeFileSync(
@@ -2868,18 +2870,10 @@ client.on(
 
           }
 
-          const ticketNumber =
-            Object.keys(
-              db.tickets
-            ).length + 1;
-
           const ticketId =
-            String(
-              ticketNumber
-            ).padStart(
-              4,
-              '0'
-            );
+  makeTicketId(
+    interaction.guild.id
+  );
 
           const channelName =
             `${interaction.user.username}-${ticketId}`
