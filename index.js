@@ -3369,6 +3369,118 @@ if (
       if (
         interaction.isModalSubmit()
       ) {
+       
+        // -----------------------------------------------
+// PANEL EDIT MODAL
+// -----------------------------------------------
+
+if (
+  interaction.customId.startsWith(
+    'panel_edit_modal_'
+  )
+) {
+
+  if (
+    !isAdmin(
+      interaction.member
+    )
+  ) {
+
+    return interaction.reply({
+      content:
+        '❌ Administrator permission required.',
+      ephemeral: true
+    });
+
+  }
+
+  const panelId =
+    interaction.customId.replace(
+      'panel_edit_modal_',
+      ''
+    );
+
+  const panel =
+    db.panels[
+      panelId
+    ];
+
+  if (!panel) {
+
+    return interaction.reply({
+      content:
+        '❌ Panel not found.',
+      ephemeral: true
+    });
+
+  }
+
+  const title =
+    interaction.fields.getTextInputValue(
+      'panel_title'
+    );
+
+  const description =
+    interaction.fields.getTextInputValue(
+      'panel_description'
+    );
+
+  const thumbnail =
+    interaction.fields.getTextInputValue(
+      'panel_thumbnail'
+    ) || '';
+
+  const banner =
+    interaction.fields.getTextInputValue(
+      'panel_banner'
+    ) || '';
+
+  let color =
+    interaction.fields.getTextInputValue(
+      'panel_color'
+    ) || '5865F2';
+
+  color =
+    color
+      .replace('#', '')
+      .trim();
+
+  if (
+    !/^[0-9a-fA-F]{6}$/.test(
+      color
+    )
+  ) {
+
+    return interaction.reply({
+      content:
+        '❌ Invalid HEX color. Example: `5865F2`',
+      ephemeral: true
+    });
+
+  }
+
+  panel.title =
+    title;
+
+  panel.description =
+    description;
+
+  panel.thumbnail =
+    thumbnail;
+
+  panel.banner =
+    banner;
+
+  panel.color =
+    color.toUpperCase();
+
+  saveDB();
+
+  return showPanelBuilder(
+    interaction,
+    panel
+  );
+}
 
         // -----------------------------------------------
         // REMINDER MODAL
