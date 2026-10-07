@@ -970,7 +970,7 @@ async function showPanelBuilder(
 
   );
 
-  return interaction.editReply({
+  return interaction.update({
 
     content:
       `### 🎫 Ticket Panel Builder\nButtons: **${panel.buttons.length}/25**`,
