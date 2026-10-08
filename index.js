@@ -286,6 +286,17 @@ function hexColor(value) {
 function getTicket(channelId) {
   return db.tickets[channelId] || null;
 }
+function makeTicketId(guildId) {
+
+  db.ticketCounters[guildId] ??= 0;
+
+  db.ticketCounters[guildId] += 1;
+
+  return String(
+    db.ticketCounters[guildId]
+  ).padStart(4, '0');
+
+}
 
 // =====================================================
 // EMBED BUILDER
