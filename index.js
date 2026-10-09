@@ -1654,9 +1654,18 @@ client.on(
 
       };
 
+      
       saveDB();
 
+      // Rename ticket to paid
+      try {
+        await message.channel.setName('paid');
+      } catch (error) {
+        console.error('Ticket rename error:', error);
+      }
+
       return message.channel.send({
+        
 
         embeds: [
 
