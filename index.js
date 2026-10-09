@@ -985,7 +985,14 @@ async function showPanelBuilder(
           .setEmoji('📢')
           .setStyle(
             ButtonStyle.Success
-          )
+          ),
+
+          new ButtonBuilder()
+            .setCustomId(`panel_edit_embed_${panel.id}`)
+            .setLabel('Edit Panel Embed')
+            .setEmoji('🎨')
+            .setStyle(ButtonStyle.Secondary)
+        
 
       )
 
@@ -2512,6 +2519,89 @@ client.on(
           );
 
         }
+        
+        // -----------------------------------------------
+        // EDIT PANEL EMBED
+        // -----------------------------------------------
+
+        if (id.startsWith('panel_edit_embed_')) {
+          if (!isAdmin(interaction.member)) {
+            return interaction.reply({
+              content: '❌ Administrator permission required.',
+              ephemeral: true
+            });
+          }
+
+          const panelId = id.replace(
+            'panel_edit_embed_',
+            ''
+          );
+
+          const panel = db.panels[panelId];
+
+          if (!panel) {
+            return interaction.reply({
+              content: '❌ Panel not found.',
+              ephemeral: true
+            });
+          }
+
+          const modal = new ModalBuilder()
+            .setCustomId(`panel_embed_modal_${panelId}`)
+            .setTitle('🎨 Edit Ticket Panel');
+
+          const title = new TextInputBuilder()
+            .setCustomId('panel_title')
+            .setLabel('Panel Title')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(256)
+            .setValue(String(panel.title || '').slice(0, 256));
+
+          const description = new TextInputBuilder()
+            .setCustomId('panel_description')
+            .setLabel('Panel Description')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(false)
+            .setMaxLength(4000)
+            .setValue(String(panel.description || '').slice(0, 4000));
+
+          const color = new TextInputBuilder()
+            .setCustomId('panel_color')
+            .setLabel('HEX Color')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(7)
+            .setPlaceholder('5865F2')
+            .setValue(String(panel.color || '5865F2'));
+
+          const thumbnail = new TextInputBuilder()
+            .setCustomId('panel_thumbnail')
+            .setLabel('Thumbnail Image URL (blank = server icon)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(4000)
+            .setValue(String(panel.thumbnail || '').slice(0, 4000));
+
+          const banner = new TextInputBuilder()
+            .setCustomId('panel_banner')
+            .setLabel('Large Banner Image URL')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(4000)
+            .setValue(String(panel.banner || '').slice(0, 4000));
+
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(title),
+            new ActionRowBuilder().addComponents(description),
+            new ActionRowBuilder().addComponents(color),
+            new ActionRowBuilder().addComponents(thumbnail),
+            new ActionRowBuilder().addComponents(banner)
+          );
+
+          return interaction.showModal(modal);
+        }
+        
 
         // -----------------------------------------------
         // ADD PANEL BUTTON
@@ -3402,6 +3492,94 @@ client.on(
           });
 
         }
+        
+        // -----------------------------------------------
+        // SAVE PANEL EMBED
+        // -----------------------------------------------
+
+        if (
+          interaction.customId.startsWith(
+            'panel_embed_modal_'
+          )
+        ) {
+          if (!isAdmin(interaction.member)) {
+            return interaction.reply({
+              content: '❌ Administrator permission required.',
+              ephemeral: true
+            });
+          }
+
+          const panelId = interaction.customId.replace(
+            'panel_embed_modal_',
+            ''
+          );
+
+          const panel = db.panels[panelId];
+
+          if (!panel) {
+            return interaction.reply({
+              content: '❌ Panel not found.',
+              ephemeral: true
+            });
+          }
+
+          const title = interaction.fields
+            .getTextInputValue('panel_title').trim();
+
+          const description = interaction.fields
+            .getTextInputValue('panel_description').trim();
+
+          const color = interaction.fields
+            .getTextInputValue('panel_color')
+            .trim()
+            .replace(/^#/, '');
+
+          const thumbnail = interaction.fields
+            .getTextInputValue('panel_thumbnail').trim();
+
+          const banner = interaction.fields
+            .getTextInputValue('panel_banner').trim();
+
+          if (color && !/^[0-9a-f]{6}$/i.test(color)) {
+            return interaction.reply({
+              content: '❌ Invalid HEX color. Example: `5865F2`',
+              ephemeral: true
+            });
+          }
+
+          for (const [label, url] of [
+            ['Thumbnail', thumbnail],
+            ['Banner', banner]
+          ]) {
+            if (url) {
+              try {
+                const parsed = new URL(url);
+
+                if (
+                  !['http:', 'https:'].includes(parsed.protocol)
+                ) {
+                  throw new Error('Invalid protocol');
+                }
+              } catch {
+                return interaction.reply({
+                  content: `❌ ${label} must be a valid HTTP/HTTPS URL.`,
+                  ephemeral: true
+                });
+              }
+            }
+          }
+
+          panel.title = title || '🎫 Support Tickets';
+          panel.description = description || 'Select a ticket type below to open a ticket.';
+          panel.color = color || '5865F2';
+          panel.thumbnail = thumbnail;
+          panel.banner = banner;
+
+          saveDB();
+
+          return showPanelBuilder(interaction, panel);
+        }
+        
 
         // -----------------------------------------------
         // PANEL BUTTON MODAL
