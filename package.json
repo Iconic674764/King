@@ -1,16 +1,19 @@
 {
-  "name": "discord-poker-crypto-bot",
-  "version": "1.0.0",
-  "description": "Advanced Discord Poker Tournament & Real Crypto Wallet Bot",
+  "name": "crypto-poker-discord-bot",
+  "version": "2.0.0",
+  "description": "Discord Crypto Poker Bot with USDT, SOL, LTC Wallet & NOWPayments integration",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.7.9",
-    "discord.js": "^14.17.3",
-    "dotenv": "^16.4.7",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7"
+    "axios": "^1.6.8",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "sharp": "^0.33.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
