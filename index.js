@@ -1,0 +1,488 @@
+require("dotenv").config();
+const express = require("express");
+const app = express();
+app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_API_KEY;
+const NOWPAYMENTS_API_URL = "https://api.nowpayments.io/v1/payment";
+
+if (!NOWPAYMENTS_API_KEY) {
+  console.warn("⚠️ NOWPAYMENTS_API_KEY is not defined in environment variables!");
+}
+
+// --- HTTP SERVER & WEBHOOK ---
+app.get("/", (req, res) => {
+  res.send("Bot & Webhook server is running!");
+});
+
+app.post("/webhook/crypto-deposit", async (req, res) => {
+  try {
+    const { payment_status, pay_amount, outcome_currency, order_id } = req.body;
+    if (payment_status === "finished" || payment_status === "confirmed") {
+      const userId = order_id; 
+      const wallet = getOrCreateWallet(userId);
+
+      const currencyMap = {
+        usdttrc20: "usdt_polygon",
+        maticpolygon: "usdt_polygon",
+        sol: "sol",
+        ltc: "ltc"
+      };
+
+      const assetKey = currencyMap[outcome_currency?.toLowerCase()] || "usdt_polygon";
+      wallet.balances[assetKey] += Number(pay_amount || 0);
+
+      wallet.deposits.push({
+        amount: Number(pay_amount || 0),
+        currency: outcome_currency ? outcome_currency.toUpperCase() : "USDT",
+        date: new Date().toISOString()
+      });
+
+      saveData(data);
+      console.log(`Successfully credited ${pay_amount} ${outcome_currency} to user ${userId}`);
+    }
+    res.status(200).send("OK");
+  } catch (err) {
+    console.error("Webhook error:", err);
+    res.status(500).send("Error");
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
+
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  AttachmentBuilder,
+} = require("discord.js");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const sharp = require("sharp");
+const axios = require("axios");
+
+const token = process.env.DISCORD_TOKEN;
+if (!token) {
+  throw new Error("DISCORD_TOKEN is required.");
+}
+
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "data.json");
+const MAX_TIMEOUT_MS = 2_147_000_000;
+const timers = new Map();
+const pendingTournaments = new Map();
+const pendingWithRole = new Map();
+const pendingConfigured = new Map();
+const pendingCodeAdditions = new Map();
+
+const ID = {
+  SETUP_BUTTON: "poker_setup_button",
+  SETUP_MODAL: "poker_setup_modal",
+  ROLE_SELECT: "poker_role_select:",
+  CAPACITY_BUTTON: "poker_capacity_button:",
+  CAPACITY_MODAL: "poker_capacity_modal:",
+  CODES_MODULE1_BUTTON: "poker_codes_m1_button:",
+  CODES_MODULE2_BUTTON: "poker_codes_m2_button:",
+  CODES_MODULE1_MODAL: "poker_codes_m1_modal:",
+  CODES_MODULE2_MODAL: "poker_codes_m2_modal:",
+  ADD_CODES_MODULE1_BUTTON: "poker_add_codes_m1_button:",
+  ADD_CODES_MODULE2_BUTTON: "poker_add_codes_m2_button:",
+  ADD_CODES_MODULE1_MODAL: "poker_add_codes_m1_modal:",
+  ADD_CODES_MODULE2_MODAL: "poker_add_codes_m2_modal:",
+  CREATE_BUTTON: "poker_create_button:",
+  REGISTER_BUTTON: "poker_register_button:",
+  REGISTER_MODAL: "poker_register_modal:",
+  CONFIRM_PAY_BUTTON: "poker_confirm_pay_button:",
+  VIEW_DETAILS_BUTTON: "poker_view_details_button:",
+  WALLET_DEPOSIT_BUTTON: "wallet_deposit_button",
+  WALLET_DEPOSIT_MODAL: "wallet_deposit_modal",
+  WALLET_WITHDRAW_BUTTON: "wallet_withdraw_button",
+  WALLET_WITHDRAW_MODAL: "wallet_withdraw_modal",
+  PANEL_PREV: "poker_panel_prev:",
+  PANEL_NEXT: "poker_panel_next:",
+  PANEL_REFRESH: "poker_panel_refresh:",
+  HELP_MENU: "poker_help_menu",
+};
+function emptyData() {
+  return { version: 3, tournaments: [], registrations: [], wallets: [] };
+}
+
+function loadData() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return emptyData();
+    const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    return {
+      version: 3,
+      tournaments: Array.isArray(parsed.tournaments) ? parsed.tournaments : [],
+      registrations: Array.isArray(parsed.registrations) ? parsed.registrations : [],
+      wallets: Array.isArray(parsed.wallets) ? parsed.wallets : [],
+    };
+  } catch (error) {
+    console.error("Could not read data.json:", error);
+    return emptyData();
+  }
+}
+
+function saveData(data) {
+  const directory = path.dirname(DATA_FILE);
+  fs.mkdirSync(directory, { recursive: true });
+  const temporaryFile = `${DATA_FILE}.tmp`;
+  fs.writeFileSync(temporaryFile, JSON.stringify(data, null, 2));
+  fs.renameSync(temporaryFile, DATA_FILE);
+}
+
+const data = loadData();
+
+function getOrCreateWallet(userId) {
+  let wallet = data.wallets.find((w) => w.userId === userId);
+  if (!wallet) {
+    wallet = {
+      userId,
+      balances: { usdt_polygon: 0, sol: 0, ltc: 0 },
+      deposits: [],
+    };
+    data.wallets.push(wallet);
+    saveData(data);
+  }
+  return wallet;
+}
+
+function normalizeUrl(raw) {
+  const value = raw.trim();
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function parseDuration(raw) {
+  const input = raw.trim().toLowerCase();
+  if (!input) return null;
+  const tokenPattern = /(\d+(?:\.\d+)?)\s*(d|h|m|s)\b/gi;
+  let totalMs = 0;
+  let match;
+  while ((match = tokenPattern.exec(input)) !== null) {
+    const amount = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    const multiplier = unit === "d" ? 24 * 3600000 : unit === "h" ? 3600000 : unit === "m" ? 60000 : 1000;
+    totalMs += amount * multiplier;
+  }
+  return totalMs >= 60000 ? totalMs : null;
+}
+
+function escapeXml(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function discordTimestamp(date, style = "F") {
+  return `<t:${Math.floor(new Date(date).getTime() / 1000)}:${style}>`;
+}
+
+function updateTournamentPrizes(tournament) {
+  const registeredPlayers = playersFor(tournament.id);
+  const count = registeredPlayers.length;
+  if (tournament.entryFee > 0) {
+    const totalPool = count * tournament.entryFee;
+    const houseFee = totalPool * (tournament.houseEdgePercentage / 100);
+    const finalPrizePool = totalPool - houseFee;
+
+    if (!tournament.customPrizeProvided) {
+      if (count === 0) {
+        tournament.prizes = "No players joined yet. Pool is 0.";
+      } else if (count === 1) {
+        tournament.prizes = `1st Place: ${finalPrizePool.toFixed(2)} USDT (100%)\nHouse Edge (${tournament.houseEdgePercentage}%): ${houseFee.toFixed(2)} USDT`;
+      } else if (count === 2) {
+        tournament.prizes = `1st Place: ${(finalPrizePool * 0.7).toFixed(2)} USDT (70%)\n2nd Place: ${(finalPrizePool * 0.3).toFixed(2)} USDT (30%)\nHouse Edge (${tournament.houseEdgePercentage}%): ${houseFee.toFixed(2)} USDT`;
+      } else {
+        tournament.prizes = `1st Place: ${(finalPrizePool * 0.5).toFixed(2)} USDT (50%)\n2nd Place: ${(finalPrizePool * 0.3).toFixed(2)} USDT (30%)\n3rd Place: ${(finalPrizePool * 0.2).toFixed(2)} USDT (20%)\nHouse Edge (${tournament.houseEdgePercentage}%): ${houseFee.toFixed(2)} USDT`;
+      }
+    }
+  }
+}
+
+function buildTournamentEmbed(tournament) {
+  updateTournamentPrizes(tournament);
+  const roleText = tournament.requiredRoleId ? `<@&${tournament.requiredRoleId}>` : "Open to Everyone";
+  const closed = tournament.status !== "active";
+  const endText = tournament.endsAt ? discordTimestamp(tournament.endsAt, "F") : "Not set";
+
+  return new EmbedBuilder()
+    .setColor(closed ? 0x747f8d : 0x5865f2)
+    .setTitle(`🃏  ${tournament.pokerName}`)
+    .setDescription(closed ? "**Tournament ended.**" : "**New Poker Tournament!** Join, Confirm Pay, or check View Details.")
+    .addFields(
+      { name: "🪙 Entry Fee & House Edge", value: `\`\`\`Fee: ${tournament.entryFee} USDT | House Edge: ${tournament.houseEdgePercentage}%\`\`\``, inline: false },
+      { name: "Rules", value: `\`\`\`${tournament.rules}\`\`\``, inline: false },
+      { name: "Prizes (Auto-calculated)", value: `\`\`\`${tournament.prizes}\`\`\``, inline: false },
+      { name: "Closes", value: endText, inline: true },
+      { name: "Role", value: roleText, inline: true }
+    )
+    .setImage("attachment://banner.png")
+    .setTimestamp();
+}
+
+function buildTournamentComponents(tournament) {
+  const isFull = Number(tournament.maxEntries) > 0 && tournament.registeredCount >= tournament.maxEntries;
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`${ID.REGISTER_BUTTON}${tournament.id}`).setLabel(`Join (${tournament.registeredCount})`).setEmoji("✅").setStyle(ButtonStyle.Success).setDisabled(isFull),
+    new ButtonBuilder().setCustomId(`${ID.CONFIRM_PAY_BUTTON}${tournament.id}`).setLabel("Confirm Pay").setEmoji("💳").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`${ID.VIEW_DETAILS_BUTTON}${tournament.id}`).setLabel("View Join Details").setEmoji("📊").setStyle(ButtonStyle.Secondary)
+  );
+}
+
+async function generateTournamentBanner(name) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360"><rect width="1200" height="360" fill="#071b12"/><text x="600" y="205" text-anchor="middle" font-size="46" fill="#ffffff">${escapeXml(name)}</text></svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+function playersFor(tournamentId) {
+  return data.registrations.filter((r) => r.tournamentId === tournamentId);
+}
+
+async function updateAnnouncement(client, tournament, components) {
+  if (!tournament.channelId || !tournament.messageId) return;
+  try {
+    const channel = await client.channels.fetch(tournament.channelId);
+    const message = await channel.messages.fetch(tournament.messageId);
+    await message.edit({ embeds: [buildTournamentEmbed(tournament)], components });
+  } catch (e) {}
+}
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
+});
+
+client.once("ready", () => {
+  console.log(`Bot logged in as ${client.user.tag}`);
+});
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot || !message.guild) return;
+  const command = message.content.trim().toLowerCase();
+  const channel = message.channel;
+
+  if (command === "!wallet") {
+    await message.delete().catch(() => {});
+    const wallet = getOrCreateWallet(message.author.id);
+    const lastDeposits = wallet.deposits.slice(-5).reverse();
+    const depositsText = lastDeposits.length ? lastDeposits.map(d => `• \`${d.amount} ${d.currency}\``).join("\n") : "No deposits yet.";
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle(`💳 ${message.author.username}'s Crypto Wallet`)
+      .addFields(
+        { name: "Balances", value: `• USDT (Polygon): \`${wallet.balances.usdt_polygon}\`\n• SOL: \`${wallet.balances.sol}\`\n• LTC: \`${wallet.balances.ltc}\`` },
+        { name: "Last Deposits", value: depositsText }
+      );
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(ID.WALLET_DEPOSIT_BUTTON).setLabel("Deposit Crypto").setEmoji("📥").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(ID.WALLET_WITHDRAW_BUTTON).setLabel("Withdraw").setEmoji("📤").setStyle(ButtonStyle.Danger)
+    );
+
+    const sent = await channel.send({ embeds: [embed], components: [row] });
+    setTimeout(() => sent.delete().catch(() => {}), 120_000);
+    return;
+  }
+
+  if (command === "!poker") {
+    await message.delete().catch(() => {});
+    if (!message.member.permissions.has("Administrator")) return;
+    const modal = new ModalBuilder().setCustomId(ID.SETUP_MODAL).setTitle("Setup Tournament");
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_name").setLabel("Name").setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_link").setLabel("Poker.now Link").setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_rules").setLabel("Rules").setStyle(TextInputStyle.Paragraph).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_fee").setLabel("Fee & Edge (e.g. 10,5)").setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_duration").setLabel("Duration (e.g. 2h)").setStyle(TextInputStyle.Short).setRequired(true))
+    );
+    await message.channel.send({ content: "Click below to open setup:", components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(ID.SETUP_BUTTON).setLabel("Start Setup").setStyle(ButtonStyle.Primary))] });
+  }
+});
+client.on("interactionCreate", async (interaction) => {
+  if (interaction.isButton()) {
+    if (interaction.customId === ID.SETUP_BUTTON) {
+      const modal = new ModalBuilder().setCustomId(ID.SETUP_MODAL).setTitle("Setup Tournament");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_name").setLabel("Name").setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_link").setLabel("Poker.now Link").setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_rules").setLabel("Rules").setStyle(TextInputStyle.Paragraph).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_fee").setLabel("Fee & Edge (e.g. 10,5)").setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("t_duration").setLabel("Duration (e.g. 2h)").setStyle(TextInputStyle.Short).setRequired(true))
+      );
+      await interaction.showModal(modal);
+    } else if (interaction.customId === ID.WALLET_DEPOSIT_BUTTON) {
+      const modal = new ModalBuilder().setCustomId(ID.WALLET_DEPOSIT_MODAL).setTitle("Deposit via NOWPayments");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("d_amt").setLabel("Amount in USD/USDT").setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("d_curr").setLabel("Currency (usdtms/sol/ltc)").setStyle(TextInputStyle.Short).setRequired(true))
+      );
+      await interaction.showModal(modal);
+    } else if (interaction.customId === ID.WALLET_WITHDRAW_BUTTON) {
+      const modal = new ModalBuilder().setCustomId(ID.WALLET_WITHDRAW_MODAL).setTitle("Withdraw Crypto");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("w_curr").setLabel("Currency (usdt_polygon/sol/ltc)").setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("w_amt").setLabel("Amount").setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("w_addr").setLabel("Destination Address").setStyle(TextInputStyle.Short).setRequired(true))
+      );
+      await interaction.showModal(modal);
+    } else if (interaction.customId.startsWith(ID.REGISTER_BUTTON)) {
+      const tournamentId = interaction.customId.slice(ID.REGISTER_BUTTON.length);
+      const modal = new ModalBuilder().setCustomId(`${ID.REGISTER_MODAL}${tournamentId}`).setTitle("Join Tournament");
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("poker_name").setLabel("Poker Username").setStyle(TextInputStyle.Short).setRequired(true)));
+      await interaction.showModal(modal);
+    } else if (interaction.customId.startsWith(ID.CONFIRM_PAY_BUTTON)) {
+      const tournamentId = interaction.customId.slice(ID.CONFIRM_PAY_BUTTON.length);
+      const tournament = data.tournaments.find(t => t.id === tournamentId);
+      const reg = data.registrations.find(r => r.tournamentId === tournamentId && r.discordUserId === interaction.user.id);
+      
+      if (!reg) {
+        await interaction.reply({ content: "❌ You have not joined this tournament yet! Click **Join** first.", ephemeral: true });
+        return;
+      }
+      if (reg.paid) {
+        await interaction.reply({ content: "✅ You have already paid the entry fee!", ephemeral: true });
+        return;
+      }
+
+      const wallet = getOrCreateWallet(interaction.user.id);
+      const fee = tournament.entryFee || 0;
+
+      if (wallet.balances.usdt_polygon < fee) {
+        await interaction.reply({ content: `❌ Insufficient balance! Required: **${fee} USDT**, Your Balance: **${wallet.balances.usdt_polygon} USDT**.`, ephemeral: true });
+        return;
+      }
+
+      wallet.balances.usdt_polygon -= fee;
+      reg.paid = true;
+      saveData(data);
+
+      await updateAnnouncement(client, tournament, [buildTournamentComponents(tournament)]);
+      await interaction.reply({ content: `✅ **Payment Successful!** Paid **${fee} USDT** for entry.\n🃏 **Table Link:** ${tournament.pokerLink}`, ephemeral: true });
+    } else if (interaction.customId.startsWith(ID.VIEW_DETAILS_BUTTON)) {
+      const tournamentId = interaction.customId.slice(ID.VIEW_DETAILS_BUTTON.length);
+      const reg = data.registrations.find(r => r.tournamentId === tournamentId && r.discordUserId === interaction.user.id);
+      const tournament = data.tournaments.find(t => t.id === tournamentId);
+
+      if (!reg || !tournament) {
+        await interaction.reply({ content: "❌ You are not registered in this tournament.", ephemeral: true });
+        return;
+      }
+
+      await interaction.reply({
+        content: `📊 **Your Tournament Join Details**\n\n• **Tournament:** ${tournament.pokerName}\n• **Poker Username:** ${reg.pokerName}\n• **Fee Paid:** ${reg.paid ? "Yes ✅" : "No ❌"}\n• **Table Link:** ${tournament.pokerLink}`,
+        ephemeral: true
+      });
+    }
+  } else if (interaction.isModalSubmit()) {
+    if (interaction.customId === ID.WALLET_DEPOSIT_MODAL) {
+      await interaction.deferReply({ ephemeral: true });
+      const amount = interaction.fields.getTextInputValue("d_amt");
+      const currency = interaction.fields.getTextInputValue("d_curr").toLowerCase();
+
+      try {
+        const response = await axios.post(
+          NOWPAYMENTS_API_URL,
+          {
+            price_amount: Number(amount),
+            price_currency: "usd",
+            pay_currency: currency,
+            order_id: interaction.user.id,
+            ipn_callback_url: "https://your-render-app.onrender.com/webhook/crypto-deposit"
+          },
+          {
+            headers: { "x-api-key": NOWPAYMENTS_API_KEY, "Content-Type": "application/json" }
+          }
+        );
+
+        const paymentData = response.data;
+        await interaction.editReply(`✅ **Deposit Invoice Created!**\nSend **${paymentData.pay_amount} ${currency.toUpperCase()}** to address:\n\`${paymentData.pay_address}\`\nYour balance will auto-update once paid.`);
+      } catch (err) {
+        console.error(err.response?.data || err.message);
+        await interaction.editReply("❌ Failed to create deposit invoice via NOWPayments.");
+      }
+    } else if (interaction.customId === ID.WALLET_WITHDRAW_MODAL) {
+      await interaction.deferReply({ ephemeral: true });
+      const currency = interaction.fields.getTextInputValue("w_curr").trim().toLowerCase();
+      const amount = Number(interaction.fields.getTextInputValue("w_amt"));
+      const address = interaction.fields.getTextInputValue("w_addr").trim();
+
+      const wallet = getOrCreateWallet(interaction.user.id);
+      if (!wallet.balances[currency] || wallet.balances[currency] < amount || amount <= 0) {
+        await interaction.editReply("❌ Invalid currency or insufficient balance for withdrawal.");
+        return;
+      }
+
+      wallet.balances[currency] -= amount;
+      saveData(data);
+      await interaction.editReply(`✅ Withdrawal of **${amount} ${currency.toUpperCase()}** to address \`${address}\` processed successfully!`);
+    } else if (interaction.customId === ID.SETUP_MODAL) {
+      await interaction.deferReply({ ephemeral: true });
+      const name = interaction.fields.getTextInputValue("t_name");
+      const link = normalizeUrl(interaction.fields.getTextInputValue("t_link"));
+      const rules = interaction.fields.getTextInputValue("t_rules");
+      const [fee, edge] = interaction.fields.getTextInputValue("t_fee").split(",").map(Number);
+      const duration = parseDuration(interaction.fields.getTextInputValue("t_duration")) || 3600000;
+
+      const tournament = {
+        id: crypto.randomUUID(),
+        guildId: interaction.guildId,
+        channelId: interaction.channelId,
+        hostId: interaction.user.id,
+        hostName: `<@${interaction.user.id}>`,
+        pokerName: name,
+        pokerLink: link,
+        rules,
+        entryFee: fee || 0,
+        houseEdgePercentage: edge || 5,
+        prizes: "Auto-calculated",
+        status: "active",
+        registeredCount: 0,
+        maxEntries: 100,
+        endsAt: new Date(Date.now() + duration).toISOString()
+      };
+
+      const channel = interaction.channel;
+      const banner = new AttachmentBuilder(await generateTournamentBanner(name), { name: "banner.png" });
+      const msg = await channel.send({ files: [banner], embeds: [buildTournamentEmbed(tournament)], components: [buildTournamentComponents(tournament)] });
+      tournament.messageId = msg.id;
+      data.tournaments.push(tournament);
+      saveData(data);
+      await interaction.editReply("✅ Tournament created successfully!");
+    } else if (interaction.customId.startsWith(ID.REGISTER_MODAL)) {
+      await interaction.deferReply({ ephemeral: true });
+      const tournamentId = interaction.customId.slice(ID.REGISTER_MODAL.length);
+      const tournament = data.tournaments.find(t => t.id === tournamentId);
+      const pokerName = interaction.fields.getTextInputValue("poker_name");
+
+      const existing = data.registrations.find(r => r.tournamentId === tournamentId && r.discordUserId === interaction.user.id);
+      if (existing) {
+        await interaction.editReply("❌ You are already registered!");
+        return;
+      }
+
+      data.registrations.push({
+        tournamentId,
+        discordUserId: interaction.user.id,
+        discordDisplayName: interaction.member.displayName,
+        pokerName,
+        paid: false,
+        registeredAt: new Date().toISOString()
+      });
+      tournament.registeredCount = playersFor(tournamentId).length;
+      saveData(data);
+      await updateAnnouncement(client, tournament, [buildTournamentComponents(tournament)]);
+      await interaction.editReply("✅ **Joined Successfully!**\nNow click the **Confirm Pay** button to pay your entry fee.");
+    }
+  }
+});
+
+client.login(token);
