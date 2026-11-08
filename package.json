@@ -1,0 +1,16 @@
+{
+  "name": "poker-bot",
+  "version": "1.0.0",
+  "description": "Discord Poker Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "canvas": "^2.11.2",
+    "discord.js": "^14.14.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.2"
+  }
+}
