@@ -1,0 +1,13 @@
+{
+  "name": "poker-points-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord free-entry tournament and non-cash points bot",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "engines": { "node": ">=20.0.0" },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.19.3",
+    "dotenv": "^16.4.7"
+  }
+}
